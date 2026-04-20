@@ -126,6 +126,7 @@ class EditorRoutes;
 class EditorRouteGroups;
 class EditorSnapshots;
 class EditorSummary;
+class EditorVSummary;
 class GUIObjectState;
 class ArdourMarker;
 class MidiRegionView;
@@ -581,6 +582,7 @@ private:
 	void add_notebook_page (std::string const&, std::string const&, Gtk::Widget&);
 
 	ArdourWidgets::VPane editor_summary_pane;
+	ArdourWidgets::HPane editor_vsummary_pane;
 
 	Gtk::EventBox meter_base;
 	Gtk::EventBox marker_base;
@@ -2144,6 +2146,8 @@ private:
 	Gtk::VBox _summary_vbox;
 	EditorSummary* _summary;
 
+	EditorVSummary* _vsummary;
+
 	void region_view_added (RegionView*);
 	void region_view_removed ();
 
@@ -2312,6 +2316,7 @@ private:
 	friend class VideoTimeLineDrag;
 
 	friend class EditorSummary;
+	friend class EditorVSummary;
 	friend class EditorGroupTabs;
 
 	friend class EditorRoutes;
