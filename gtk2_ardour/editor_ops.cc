@@ -1768,9 +1768,7 @@ Editor::scroll_up_one_track (bool skip_child_views)
 bool
 Editor::scroll_to_track_at_y (double y, bool skip_child_views)
 {
-	TrackViewList::iterator t;
-
-	for (t = track_views.begin(); t != track_views.end(); ++t) {
+	for (TrackViewList::iterator t = track_views.begin(); t != track_views.end(); ++t) {
 
 		if ((*t)->hidden()) {
 			continue;
@@ -1783,21 +1781,19 @@ Editor::scroll_to_track_at_y (double y, bool skip_child_views)
 		std::pair<TimeAxisView*,double> res = (*t)->covers_y_position (y);
 
 		if (res.first) {
-			
+
 			if (!skip_child_views) {
 
 				/* move to the top of the automation track if one crosses y */
 
 				TimeAxisView::Children kids = (*t)->get_child_list();
-				TimeAxisView::Children::iterator ci;
 
-				for (ci = kids.begin(); ci != kids.end(); ++ci) {
+				for (TimeAxisView::Children::iterator ci = kids.begin(); ci != kids.end(); ++ci) {
 					if ((*ci)->hidden()) {
 						continue;
 					}
 
-					std::pair<TimeAxisView*,double> dev;
-					dev = (*ci)->covers_y_position (y);
+					std::pair<TimeAxisView*,double> dev = (*ci)->covers_y_position (y);
 					if (dev.first) {
 						ensure_time_axis_view_is_visible (**ci, true);
 						return true;
