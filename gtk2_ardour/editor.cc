@@ -5654,6 +5654,7 @@ Editor::use_own_window (bool and_fill_it)
 
 	/* re-hide stuff if necessary */
 	parameter_changed ("show-summary");
+	parameter_changed ("show-vertical-summary");
 	parameter_changed ("show-group-tabs");
 	parameter_changed ("show-zoom-tools");
 
