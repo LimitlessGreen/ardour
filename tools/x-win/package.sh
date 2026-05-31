@@ -31,14 +31,16 @@ PROGRAM_VERSION=${major_version}
 PRODUCT_NAME=Ardour
 PRODUCT_VERSION=${major_version}
 
-WITH_HARRISON_LV2=1
-WITH_HARRISON_VBM=
-WITH_COMMERCIAL_X42_LV2=
-WITH_GRATIS_X42_LV2=
-WITH_GMSYNTH=1
-WITH_HARVID=1
-WITH_XJADEO=1
-X42PLUGINS="x42-autotune x42-midifilter x42-stereoroute setBfree x42-avldrums x42-limiter x42-tuner"
+# Preserve environment overrides from CI (empty string means disabled).
+: ${WITH_HARRISON_LV2=1}
+: ${WITH_HARRISON_VBM=}
+: ${WITH_COMMERCIAL_X42_LV2=}
+: ${WITH_GRATIS_X42_LV2=}
+: ${WITH_GMSYNTH=1}
+: ${WITH_HARVID=1}
+: ${WITH_XJADEO=1}
+: ${WITH_LEGACY_LIBWINPTHREAD=}
+: ${X42PLUGINS="x42-autotune x42-midifilter x42-stereoroute setBfree x42-avldrums x42-limiter x42-tuner"}
 
 # TODO: grep from build/config.log instead
 while [ $# -gt 0 ] ; do
@@ -130,8 +132,13 @@ if ! test -f build/gtk2_ardour/ardour-${ARDOURVERSION}.exe; then
 fi
 
 echo " === bundle to $DESTDIR"
-
+# Keep packaging DESTDIR separate from waf install DESTDIR.
+# In CI we export DESTDIR for packaging staging, but waf install must populate
+# $PREFIX/share/$LOWERCASE_DIRNAME for subsequent copy steps below.
+WAF_INSTALL_DESTDIR="${DESTDIR}"
+unset DESTDIR
 ./waf install
+DESTDIR="${WAF_INSTALL_DESTDIR}"
 
 ################################################################################
 
@@ -154,16 +161,18 @@ mkdir -p $ALIBDIR/vamp
 mkdir -p $ALIBDIR/suil
 
 # cp $PREFIX/lib/ardour*/*-*.dll $DESTDIR/bin/
-cp build/libs/gtkmm2ext/gtkmm2ext-*.dll $DESTDIR/bin/
-cp build/libs/midi++2/midipp-*.dll $DESTDIR/bin/
-cp build/libs/evoral/evoral-*.dll $DESTDIR/bin/
-cp build/libs/ardour/ardour-*.dll $DESTDIR/bin/
-cp build/libs/temporal/temporal-*.dll $DESTDIR/bin/
-cp build/libs/aaf/aaf-*.dll $DESTDIR/bin/
-cp build/libs/canvas/canvas-*.dll $DESTDIR/bin/
-cp build/libs/widgets/widgets-*.dll $DESTDIR/bin/
-cp build/libs/waveview/waveview-*.dll $DESTDIR/bin/
-cp build/libs/pbd/pbd-*.dll $DESTDIR/bin/
+# Some variants/toolchains may not emit every intermediate DLL in build/libs;
+# runtime dependencies are still bundled from $PREFIX/bin below.
+cp build/libs/gtkmm2ext/gtkmm2ext-*.dll $DESTDIR/bin/ || true
+cp build/libs/midi++2/midipp-*.dll $DESTDIR/bin/ || true
+cp build/libs/evoral/evoral-*.dll $DESTDIR/bin/ || true
+cp build/libs/ardour/ardour-*.dll $DESTDIR/bin/ || true
+cp build/libs/temporal/temporal-*.dll $DESTDIR/bin/ || true
+cp build/libs/aaf/aaf-*.dll $DESTDIR/bin/ || true
+cp build/libs/canvas/canvas-*.dll $DESTDIR/bin/ || true
+cp build/libs/widgets/widgets-*.dll $DESTDIR/bin/ || true
+cp build/libs/waveview/waveview-*.dll $DESTDIR/bin/ || true
+cp build/libs/pbd/pbd-*.dll $DESTDIR/bin/ || true
 cp build/libs/tk/ztk/ztk-*.dll $DESTDIR/bin/ || true
 cp build/libs/tk/ydk/ydk-*.dll $DESTDIR/bin/ || true
 cp build/libs/tk/ytk/ytk-*.dll $DESTDIR/bin/ || true
@@ -172,10 +181,10 @@ cp build/libs/tk/ydkmm/ydkmm-*.dll $DESTDIR/bin/ || true
 cp build/libs/tk/ztkmm/ztkmm-*.dll $DESTDIR/bin/ || true
 cp build/libs/tk/ydk-pixbuf/ydk-pixbuf-*.dll $DESTDIR/bin/ || true
 cp build/libs/tk/suil/suil-*.dll $DESTDIR/bin/ || true
-cp build/libs/ctrl-interface/midi_surface/ardour*.dll $DESTDIR/bin/
-cp build/libs/ctrl-interface/control_protocol/ardour*.dll $DESTDIR/bin/
-cp build/libs/ptformat/ptformat-*.dll $DESTDIR/bin/
-cp build/libs/audiographer/audiographer-*.dll $DESTDIR/bin/
+cp build/libs/ctrl-interface/midi_surface/ardour*.dll $DESTDIR/bin/ || true
+cp build/libs/ctrl-interface/control_protocol/ardour*.dll $DESTDIR/bin/ || true
+cp build/libs/ptformat/ptformat-*.dll $DESTDIR/bin/ || true
+cp build/libs/audiographer/audiographer-*.dll $DESTDIR/bin/ || true
 cp build/libs/fst/ardour-vst-scanner.exe $DESTDIR/bin/ || true
 cp build/libs/fst/ardour-vst3-scanner.exe $DESTDIR/bin/ || true
 cp build/session_utils/*-*.exe $DESTDIR/bin/ || true
@@ -187,9 +196,12 @@ cp build/libs/clearlooks-newer/clearlooks.dll $DESTDIR/lib/gtk-2.0/engines/libcl
 
 cp $PREFIX/bin/*.dll $DESTDIR/bin/
 cp $PREFIX/bin/*.yes $DESTDIR/bin/ || true
-cp $PREFIX/lib/*.dll $DESTDIR/bin/
+cp $PREFIX/lib/*.dll $DESTDIR/bin/ || true
+# Core Ardour runtime DLLs are installed to $PREFIX/lib/$LOWERCASE_DIRNAME
+# and may be unversioned (e.g. ardour.dll, aaf.dll). Bundle them explicitly.
+cp $PREFIX/lib/${LOWERCASE_DIRNAME}/*.dll $DESTDIR/bin/ || true
 # special case libportaudio (wasapi), old stack has no wasapi and hence no .xp
-cp $PREFIX/bin/libportaudio-2.xp $DESTDIR/bin/ || cp $PREFIX/bin/libportaudio-2.dll $DESTDIR/bin/libportaudio-2.xp
+cp $PREFIX/bin/libportaudio-2.xp $DESTDIR/bin/ || cp $PREFIX/bin/libportaudio-2.dll $DESTDIR/bin/libportaudio-2.xp || true
 
 # prefer system-wide DLL
 rm -rf $DESTDIR/bin/libjack*.dll
@@ -200,13 +212,13 @@ rm -rf $DESTDIR/bin/libjack*.dll
 rm -rf $DESTDIR/bin/dbghelp*.dll
 rm -rf $DESTDIR/bin/dbgcore*.dll
 
-cp `find build/libs/surfaces/ -iname "*.dll"` $ALIBDIR/surfaces/
-cp `find build/libs/backends/ -iname "*.dll"` $ALIBDIR/backends/
-cp `find build/libs/panners/ -iname "*.dll"` $ALIBDIR/panners/
+find build/libs/surfaces/ -iname "*.dll" -exec cp {} $ALIBDIR/surfaces/ \; || true
+find build/libs/backends/ -iname "*.dll" -exec cp {} $ALIBDIR/backends/ \; || true
+find build/libs/panners/ -iname "*.dll" -exec cp {} $ALIBDIR/panners/ \; || true
 
 cp -r build/libs/LV2 $ALIBDIR/ || true
-cp -r build/libs/vamp-plugins/*ardourvampplugins*.dll $ALIBDIR/vamp/libardourvampplugins.dll
-cp -r build/libs/vamp-pyin/*ardourvamppyin*.dll $ALIBDIR/vamp/libardourvamppyin.dll
+cp -r build/libs/vamp-plugins/*ardourvampplugins*.dll $ALIBDIR/vamp/libardourvampplugins.dll || true
+cp -r build/libs/vamp-pyin/*ardourvamppyin*.dll $ALIBDIR/vamp/libardourvamppyin.dll || true
 
 if test -d build/libs/tk/suil/; then
 	cp build/libs/tk/suil/suil_win_in_gtk2.dll $ALIBDIR/suil/
@@ -222,19 +234,22 @@ for file in $PREFIX/lib/lv2/*.lv2; do
 done
 
 # TODO use -static-libgcc -static-libstdc++ -- but for .exe files only
-if update-alternatives --query ${XPREFIX}-gcc | grep Value: | grep -q win32; then
-	cp /usr/lib/gcc/${XPREFIX}/*-win32/libgcc_s_*.dll $DESTDIR/bin/
-	cp /usr/lib/gcc/${XPREFIX}/*-win32/libstdc++-6.dll $DESTDIR/bin/
-elif update-alternatives --query ${XPREFIX}-gcc | grep Value: | grep -q posix; then
-	cp /usr/lib/gcc/${XPREFIX}/*-posix/libgcc_s_*.dll $DESTDIR/bin/
-	cp /usr/lib/gcc/${XPREFIX}/*-posix/libstdc++-6.dll $DESTDIR/bin/
-else
-	cp /usr/lib/gcc/${XPREFIX}/*/libgcc_s_sjlj-1.dll $DESTDIR/bin/
-	cp /usr/lib/gcc/${XPREFIX}/*/libstdc++-6.dll $DESTDIR/bin/
-fi
-
-if test -f /usr/${XPREFIX}/lib/libwinpthread-1.dll; then
-	cp /usr/${XPREFIX}/lib/libwinpthread-1.dll $DESTDIR/bin/
+# On Linux cross-compile, copy GCC runtime DLLs from the cross-toolchain.
+# On native MSYS2 these DLLs are already bundled via the $PREFIX/bin/*.dll copy above.
+if command -v update-alternatives > /dev/null 2>&1; then
+	if update-alternatives --query ${XPREFIX}-gcc 2>/dev/null | grep Value: | grep -q win32; then
+		cp /usr/lib/gcc/${XPREFIX}/*-win32/libgcc_s_*.dll $DESTDIR/bin/
+		cp /usr/lib/gcc/${XPREFIX}/*-win32/libstdc++-6.dll $DESTDIR/bin/
+	elif update-alternatives --query ${XPREFIX}-gcc 2>/dev/null | grep Value: | grep -q posix; then
+		cp /usr/lib/gcc/${XPREFIX}/*-posix/libgcc_s_*.dll $DESTDIR/bin/
+		cp /usr/lib/gcc/${XPREFIX}/*-posix/libstdc++-6.dll $DESTDIR/bin/
+	else
+		cp /usr/lib/gcc/${XPREFIX}/*/libgcc_s_sjlj-1.dll $DESTDIR/bin/ 2>/dev/null || true
+		cp /usr/lib/gcc/${XPREFIX}/*/libstdc++-6.dll $DESTDIR/bin/ 2>/dev/null || true
+	fi
+	if test -f /usr/${XPREFIX}/lib/libwinpthread-1.dll; then
+		cp /usr/${XPREFIX}/lib/libwinpthread-1.dll $DESTDIR/bin/
+	fi
 fi
 
 cp -r $PREFIX/share/${LOWERCASE_DIRNAME} $DESTDIR/share/
@@ -313,12 +328,18 @@ fi
 OUTFILE="${TMPDIR}/${PRODUCT_NAME}-${ARDOURVERSION}${BUILDTYPE}-${WARCH}-Setup.exe"
 
 if test -n "$PACKAGE_GDB"; then
-	echo " === bundle gdb + custom libwinpthread-1.dll"
-	# https://gist.github.com/x42/469f412b51294d5123be82f34906ba3f
-	# applied to mingw-w64-12.0.0 to work around thread_local use after free
-	# https://github.com/msys2/MINGW-packages/issues/2519
-	download libwinpthread-1.dll http://ardour.org/files/deps/libwinpthread-1.dll
-	cp ${SRCCACHE}/libwinpthread-1.dll $DESTDIR/bin/
+	echo " === bundle gdb"
+	# The matching libwinpthread from the active toolchain is already bundled
+	# earlier from $PREFIX/bin. Keep the historical replacement DLL opt-in only,
+	# otherwise newer libstdc++ builds can fail to start due to symbol mismatch.
+	if test -n "$WITH_LEGACY_LIBWINPTHREAD"; then
+		echo " === bundle legacy libwinpthread-1.dll"
+		# https://gist.github.com/x42/469f412b51294d5123be82f34906ba3f
+		# applied to mingw-w64-12.0.0 to work around thread_local use after free
+		# https://github.com/msys2/MINGW-packages/issues/2519
+		download libwinpthread-1.dll http://ardour.org/files/deps/libwinpthread-1.dll
+		cp ${SRCCACHE}/libwinpthread-1.dll $DESTDIR/bin/
+	fi
 
 	# re-packaged from https://packages.msys2.org/package/mingw-w64-x86_64-gdb
 	download gdb12-win64.tar.xz http://ardour.org/files/gdb/gdb12-win64.tar.xz
@@ -498,14 +519,23 @@ SetCompressorDictSize 32
 EOF
 fi
 
+# Convert paths to native Windows format for NSIS (needed on MSYS2/Cygwin)
+if command -v cygpath > /dev/null 2>&1; then
+	NSIS_INCLUDEDIR="$(cygpath -w ${this_script_dir}/nsis)"
+	NSIS_OUTFILE="$(cygpath -w ${OUTFILE})"
+else
+	NSIS_INCLUDEDIR="${this_script_dir}\\nsis"
+	NSIS_OUTFILE="${OUTFILE}"
+fi
+
 cat >> $NSISFILE << EOF
-!addincludedir "${this_script_dir}\\nsis"
+!addincludedir "${NSIS_INCLUDEDIR}"
 !include MUI2.nsh
 !include FileAssociation.nsh
 !include WinVer.nsh
 
 Name "${PROGRAM_NAME}${PROGRAM_VERSION}"
-OutFile "${OUTFILE}"
+OutFile "${NSIS_OUTFILE}"
 RequestExecutionLevel admin
 InstallDir "\$${PGF}\\${PRODUCT_ID}"
 InstallDirRegKey HKLM "Software\\${PRODUCT_NAME}\\${PRODUCT_ID}\\$WARCH" "Install_Dir"

@@ -293,6 +293,7 @@ def build(bld):
     obj.install_path    = bld.env['LIBDIR']
 
     if sys.platform == 'darwin':
+        autowaf.ensure_visible_symbols(obj, True)
         obj.source   = libytk_sources +  libytk_quartz_sources
         obj.cflags   += ['-xobjective-c']
         obj.uselib   += ' OSX' #  -framework Cocoa -framework CoreFoundation -framework ApplicationServices

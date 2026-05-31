@@ -631,7 +631,7 @@ ARDOUR::init (bool try_optimization, const char* localedir, bool with_gui)
 	}
 #endif
 
-#ifdef HAVE_FFTW35F
+#if defined(HAVE_FFTW35F) && !defined(PLATFORM_WINDOWS)
 	fftwf_make_planner_thread_safe ();
 #endif
 

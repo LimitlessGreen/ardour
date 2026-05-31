@@ -17,16 +17,21 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
+#include <iostream>
+#include <errno.h>
 #include <sys/types.h>
 
+#include "pbd/error.h"
 #include "pbd/failed_constructor.h"
 #include "pbd/pthread_utils.h"
 
 #include "ardour/debug.h"
 #include "ardour/dsp_filter.h"
+#include "ardour/profile.h"
 #include "ardour/transport_master.h"
 #include "ardour/session.h"
 #include "ardour/audioengine.h"
+#include "ardour/audio_port.h"
 
 #include "pbd/i18n.h"
 
@@ -415,8 +420,6 @@ LTC_TransportMaster::process_ltc(samplepos_t const now)
 	LTCFrameExt ltc_frame;
 	LTC_TV_STANDARD tv_standard = LTC_TV_625_50;
 
-	bool keep_rolling = Config->get_transport_masters_just_roll_when_sync_lost();
-
 	while (ltc_decoder_read (decoder, &ltc_frame)) {
 
 		SMPTETimecode stime;
@@ -440,9 +443,7 @@ LTC_TransportMaster::process_ltc(samplepos_t const now)
 			}
 		}
 
-		if (keep_rolling && fps_detected && _session && _session->actively_recording ()) {
-			/* keep recording with current framerate. */
-		} else if (!ltc_is_stationary && detect_ltc_fps (stime.frame, (ltc_frame.ltc.dfbit) ? true : false)) {
+		if (!ltc_is_stationary && detect_ltc_fps (stime.frame, (ltc_frame.ltc.dfbit) ? true : false)) {
 			reset (true);
 			fps_detected = true;
 			timecode_format_valid = true; /* SET FLAG */
@@ -631,11 +632,7 @@ LTC_TransportMaster::pre_process (ARDOUR::pframes_t nframes, samplepos_t now, st
 		}
 	}
 
-	bool const keep_rolling = Config->get_transport_masters_just_roll_when_sync_lost();
-
-	if (keep_rolling && _session && _session->actively_recording ()) {
-		/* keep recording */
-	} else if (abs (now - current.timestamp) > FLYWHEEL_TIMEOUT) {
+	if (abs (now - current.timestamp) > FLYWHEEL_TIMEOUT) {
 		DEBUG_TRACE (DEBUG::LTC, "flywheel timeout\n");
 		reset(true);
 		/* don't change position from last known */
@@ -694,7 +691,7 @@ std::string
 LTC_TransportMaster::delta_string() const
 {
 	if (!_collect || current.timestamp == 0) {
-		return X_(u8"\u2012\u2012\u2012\u2012");
+		return X_("\u2012\u2012\u2012\u2012");
 	} else if ((monotonic_cnt - current.timestamp) > 2 * samples_per_ltc_frame) {
 		return _("flywheel");
 	} else {

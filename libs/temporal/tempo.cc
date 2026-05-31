@@ -49,8 +49,35 @@ std::string Tempo::xml_node_name = X_("Tempo");
 std::string Meter::xml_node_name = X_("Meter");
 
 SerializedRCUManager<TempoMap> TempoMap::_map_mgr (0);
-thread_local TempoMap::SharedPtr TempoMap::_tempo_map_p;
+LIBTEMPORAL_API thread_local TempoMap::SharedPtr TempoMap::_tempo_map_p;
 PBD::Signal<void()> TempoMap::MapChanged;
+
+void
+TempoMap::update_thread_tempo_map ()
+{
+	_tempo_map_p = _map_mgr.reader();
+}
+
+TempoMap::SharedPtr
+TempoMap::use ()
+{
+	assert (_tempo_map_p);
+	return _tempo_map_p;
+}
+
+TempoMap::SharedPtr
+TempoMap::fetch ()
+{
+	assert (fetch_condition());
+	update_thread_tempo_map();
+	return _tempo_map_p;
+}
+
+void
+TempoMap::set (SharedPtr new_map)
+{
+	_tempo_map_p = new_map;
+}
 
 #ifndef NDEBUG
 #define TEMPO_MAP_ASSERT(expr) TempoMap::map_assert(expr, #expr, __FILE__, __LINE__)

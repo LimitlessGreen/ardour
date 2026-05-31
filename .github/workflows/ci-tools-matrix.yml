@@ -1,0 +1,379 @@
+name: CI - Ardour Full Build Matrix
+
+on:
+  push:
+    paths-ignore:
+      - 'doc/**'
+      - '*.md'
+      - 'README*'
+      - 'TRANSLATORS'
+  pull_request:
+    paths-ignore:
+      - 'doc/**'
+      - '*.md'
+      - 'README*'
+      - 'TRANSLATORS'
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: Number of parallel build jobs passed to waf
+        required: false
+        default: '4'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-ardour-full-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ardour:
+    name: Build Ardour (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+            shell: bash
+            backends: jack,dummy,alsa,pulseaudio
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            shell: bash
+            backends: jack,dummy,alsa,pulseaudio
+          - target: macos-arm64
+            runner: macos-14
+            shell: bash
+            backends: dummy,coreaudio
+
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 750M
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache pkg-config git python3-dev gettext libboost-dev libboost-filesystem-dev libboost-system-dev libasound2-dev libpulse-dev libglib2.0-dev libglibmm-2.4-dev libcairomm-1.0-dev libpangomm-1.4-dev libxml2-dev libjpeg-dev libsndfile1-dev libarchive-dev liblo-dev libtag1-dev libcurl4-openssl-dev libusb-1.0-0-dev libaubio-dev libfluidsynth-dev libltc-dev libsamplerate0-dev liblrdf0-dev lv2-dev liblilv-dev libsuil-dev libsratom-dev libsord-dev libserd-dev vamp-plugin-sdk librubberband-dev libfftw3-dev libflac-dev libogg-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev libxrandr-dev libxi-dev libjack-jackd2-dev libcppunit-dev
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew update
+          brew install boost ccache pkg-config gettext gtkmm3 glibmm cairomm pangomm fluidsynth libltc libsndfile libarchive liblo taglib rubberband libusb aubio libsamplerate lv2 lilv serd sord sratom vamp-plugin-sdk fftw flac libogg libxml2 jpeg-turbo fontconfig jack
+
+      - name: Export macOS package paths
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DEPSTACK_GTK="/Users/runner/gtk/inst"
+          BREW_PREFIX="$(brew --prefix)"
+          GLIBMM_PREFIX="$(brew --prefix glibmm || true)"
+          CAIROMM_PREFIX="$(brew --prefix cairomm || true)"
+          PANGOMM_PREFIX="$(brew --prefix pangomm || true)"
+          GTKMM_PREFIX="$(brew --prefix gtkmm3 || true)"
+          LIBARCHIVE_PREFIX="$(brew --prefix libarchive || true)"
+          CCACHE_PREFIX="$(brew --prefix ccache)"
+          if [[ -d "$DEPSTACK_GTK/lib/pkgconfig" ]]; then
+            DEPSTACK_PKGCONFIG="$DEPSTACK_GTK/lib/pkgconfig:"
+            DEPSTACK_CPPFLAGS="-I$DEPSTACK_GTK/include "
+            DEPSTACK_LDFLAGS="-L$DEPSTACK_GTK/lib "
+          else
+            DEPSTACK_PKGCONFIG=""
+            DEPSTACK_CPPFLAGS=""
+            DEPSTACK_LDFLAGS=""
+          fi
+          echo "HOMEBREW_PREFIX=$BREW_PREFIX" >> "$GITHUB_ENV"
+          echo "LIBARCHIVE_PREFIX=$LIBARCHIVE_PREFIX" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${DEPSTACK_PKGCONFIG}$BREW_PREFIX/lib/pkgconfig:$BREW_PREFIX/opt/libxml2/lib/pkgconfig:$GLIBMM_PREFIX/lib/pkgconfig:$CAIROMM_PREFIX/lib/pkgconfig:$PANGOMM_PREFIX/lib/pkgconfig:$GTKMM_PREFIX/lib/pkgconfig:$LIBARCHIVE_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+          echo "CPPFLAGS=${DEPSTACK_CPPFLAGS}-I$BREW_PREFIX/include -I$BREW_PREFIX/opt/libxml2/include" >> "$GITHUB_ENV"
+          echo "LDFLAGS=${DEPSTACK_LDFLAGS}-L$BREW_PREFIX/lib -L$BREW_PREFIX/opt/libxml2/lib" >> "$GITHUB_ENV"
+          echo "PATH=$CCACHE_PREFIX/libexec:$BREW_PREFIX/opt/gettext/bin:$BREW_PREFIX/bin:$BREW_PREFIX/sbin:$PATH" >> "$GITHUB_ENV"
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-v2-${{ matrix.target }}-${{ github.ref_name }}-${{ hashFiles('wscript') }}
+          restore-keys: |
+            ccache-v2-${{ matrix.target }}-${{ github.ref_name }}-
+            ccache-v2-${{ matrix.target }}-${{ github.event.repository.default_branch }}-
+            ccache-v2-${{ matrix.target }}-
+
+      - name: Prepare compiler wrappers
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$CCACHE_DIR"
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            echo "PATH=/usr/lib/ccache:$PATH" >> "$GITHUB_ENV"
+          fi
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$CCACHE_BASEDIR" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=$CCACHE_COMPILERCHECK" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=$CCACHE_MAXSIZE" >> "$GITHUB_ENV"
+          ccache -p
+
+      - name: Prepare output folders
+        shell: bash
+        run: |
+          mkdir -p _ci_logs
+          mkdir -p _ci_artifacts
+
+      - name: Configure Ardour
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            export CPPFLAGS="${CPPFLAGS:-} -I$LIBARCHIVE_PREFIX/include"
+            export LDFLAGS="${LDFLAGS:-} -L$LIBARCHIVE_PREFIX/lib"
+            EXTRA_INCLUDE="--also-include=$HOMEBREW_PREFIX/include,$HOMEBREW_PREFIX/opt/libxml2/include"
+            EXTRA_LIBDIR="--also-libdir=$HOMEBREW_PREFIX/lib,$HOMEBREW_PREFIX/opt/libxml2/lib"
+            EXTRA_OPTS=""
+          else
+            EXTRA_INCLUDE=""
+            EXTRA_LIBDIR=""
+            EXTRA_OPTS=""
+          fi
+          python ./waf configure --with-backends=${{ matrix.backends }} --prefix="$PWD/_ci_install" $EXTRA_INCLUDE $EXTRA_LIBDIR $EXTRA_OPTS 2>&1 | tee _ci_logs/configure.log
+
+      - name: Build Ardour
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python ./waf -j "${{ inputs.jobs || '4' }}" 2>&1 | tee _ci_logs/build.log
+          python ./waf i18n 2>&1 | tee _ci_logs/i18n.log
+
+      - name: Show ccache stats
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ccache -s || true
+
+      - name: Package build tree for artifact upload
+        shell: bash
+        run: |
+          set -euxo pipefail
+          tar -czf "_ci_artifacts/ardour-${{ matrix.target }}.tar.gz" \
+            build/gtk2_ardour \
+            build/libs \
+            gtk2_ardour/ardev \
+            gtk2_ardour/ardev_common.sh.in
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardour-logs-${{ matrix.target }}
+          path: _ci_logs/*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardour-${{ matrix.target }}
+          path: _ci_artifacts/*
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Windows x64 – native MSYS2/MINGW64 build + NSIS installer (package.sh)
+  # ──────────────────────────────────────────────────────────────────────────
+  build-ardour-windows:
+    name: Build Ardour (windows-x64)
+    runs-on: windows-2022
+    timeout-minutes: 150
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_PATH: /mingw64/bin
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 750M
+      MINGW_PREFIX: /mingw64
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          cache: true
+          msystem: MINGW64
+          install: >-
+            base-devel
+            git
+            zip
+            unzip
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-glibmm
+            mingw-w64-x86_64-cairomm
+            mingw-w64-x86_64-pangomm
+            mingw-w64-x86_64-libsndfile
+            mingw-w64-x86_64-libarchive
+            mingw-w64-x86_64-liblo
+            mingw-w64-x86_64-fluidsynth
+            mingw-w64-x86_64-taglib
+            mingw-w64-x86_64-rubberband
+            mingw-w64-x86_64-libusb
+            mingw-w64-x86_64-aubio
+            mingw-w64-x86_64-libsamplerate
+            mingw-w64-x86_64-lv2
+            mingw-w64-x86_64-lilv
+            mingw-w64-x86_64-fftw
+            mingw-w64-x86_64-flac
+            mingw-w64-x86_64-libogg
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-libxml2
+            mingw-w64-x86_64-fontconfig
+            mingw-w64-x86_64-portaudio
+            mingw-w64-x86_64-jack2
+            mingw-w64-x86_64-nsis
+            mingw-w64-x86_64-ntldd
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-v2-windows-x64-${{ github.ref_name }}-${{ hashFiles('wscript') }}
+          restore-keys: |
+            ccache-v2-windows-x64-${{ github.ref_name }}-
+            ccache-v2-windows-x64-${{ github.event.repository.default_branch }}-
+            ccache-v2-windows-x64-
+
+      - name: Prepare output folders
+        run: mkdir -p _ci_logs _ci_artifacts
+
+      - name: Prepare ccache compiler launchers
+        run: |
+          set -euxo pipefail
+          cat > .ci-gcc.cmd <<'EOF'
+          @echo off
+          ccache.exe gcc.exe %*
+          EOF
+          cat > .ci-g++.cmd <<'EOF'
+          @echo off
+          ccache.exe g++.exe %*
+          EOF
+
+      - name: Show toolchain versions
+        run: |
+          set -euxo pipefail
+          mkdir -p "$CCACHE_DIR"
+          export PATH="$MINGW_PREFIX/bin:/usr/bin:$PATH"
+          gcc --version 2>&1 | tee _ci_logs/gcc.log
+          ccache --version 2>&1 | tee _ci_logs/ccache-version.log
+          ccache -p | tee _ci_logs/ccache-config.log
+
+      - name: Configure Ardour
+        run: |
+          set -euxo pipefail
+          export PATH="$MINGW_PREFIX/bin:/usr/bin:$PATH"
+          export CC="$PWD/.ci-gcc.cmd"
+          export CXX="$PWD/.ci-g++.cmd"
+          export CPP="$MINGW_PREFIX/bin/cpp"
+          export PKG_CONFIG_PATH="$MINGW_PREFIX/lib/pkgconfig"
+          # Install to $MINGW_PREFIX so that package.sh can find share/etc data
+          # alongside the MSYS2 runtime DLLs in the same prefix.
+          python3 ./waf configure \
+            --check-c-compiler=gcc \
+            --check-cxx-compiler=g++ \
+            --no-dr-mingw \
+            --keepflags \
+            --dist-target=mingw \
+            --also-include="$MINGW_PREFIX/include" \
+            --with-backends=jack,dummy,portaudio \
+            --prefix="$MINGW_PREFIX" \
+            --libdir="$MINGW_PREFIX/lib" 2>&1 | tee _ci_logs/configure.log || {
+              [[ -f build/config.log ]] && cp build/config.log _ci_logs/config.full.log
+              exit 1
+            }
+
+      - name: Build Ardour
+        run: |
+          set -euxo pipefail
+          export PATH="$MINGW_PREFIX/bin:/usr/bin:$PATH"
+          export CC="$PWD/.ci-gcc.cmd"
+          export CXX="$PWD/.ci-g++.cmd"
+          export CPP="$MINGW_PREFIX/bin/cpp"
+          python3 ./waf -j "${{ inputs.jobs || '4' }}" 2>&1 | tee _ci_logs/build.log
+          python3 ./waf i18n 2>&1 | tee _ci_logs/i18n.log
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s || true
+
+      - name: Package Ardour with package.sh
+        run: |
+          set -euxo pipefail
+          export PATH="$MINGW_PREFIX/bin:/usr/bin:$PATH"
+          # Use MSYS2 MINGW64 as the dep stack prefix.
+          # waf install (called inside package.sh) writes to $MINGW_PREFIX,
+          # which already holds all runtime DLLs → package.sh finds everything.
+          export XARCH=x86_64
+          export ROOT=/
+          export PREFIX="$MINGW_PREFIX"
+          export DESTDIR="$PWD/_ci_stage"
+          export TMPDIR="$PWD/_ci_artifacts"
+          export SRCCACHE="$PWD/_ci_srccache"
+          export WITH_HARRISON_LV2=
+          export WITH_GMSYNTH=
+          export WITH_HARVID=
+          export WITH_XJADEO=
+          mkdir -p "$DESTDIR" "$TMPDIR" "$SRCCACHE"
+          bash tools/x-win/package.sh 2>&1 | tee _ci_logs/package.log
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardour-logs-windows-x64
+          path: _ci_logs/*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Ardour installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardour-windows-x64-installer
+          path: _ci_artifacts/Ardour-*-w64-Setup.exe
+          if-no-files-found: warn
+          retention-days: 30
+

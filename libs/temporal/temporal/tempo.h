@@ -752,7 +752,7 @@ class /*LIBTEMPORAL_API*/ TempoMap : public PBD::StatefulDestructible
 	typedef std::shared_ptr<TempoMap const> SharedPtr;
 	typedef std::shared_ptr<TempoMap> WritableSharedPtr;
   private:
-	static thread_local SharedPtr _tempo_map_p;
+	static LIBTEMPORAL_API thread_local SharedPtr _tempo_map_p;
 	static SerializedRCUManager<TempoMap> _map_mgr;
 	static bool fetch_condition ();
   public:
@@ -762,9 +762,9 @@ class /*LIBTEMPORAL_API*/ TempoMap : public PBD::StatefulDestructible
   public:
 	LIBTEMPORAL_API static void init ();
 
-	LIBTEMPORAL_API static void      update_thread_tempo_map() { _tempo_map_p = _map_mgr.reader(); }
-	LIBTEMPORAL_API static SharedPtr use() { assert (_tempo_map_p); return _tempo_map_p; }
-	LIBTEMPORAL_API static SharedPtr fetch() { assert (fetch_condition()); update_thread_tempo_map(); return _tempo_map_p; }
+	LIBTEMPORAL_API static void      update_thread_tempo_map();
+	LIBTEMPORAL_API static SharedPtr use();
+	LIBTEMPORAL_API static SharedPtr fetch();
 	/* No fetch condition for this, to be used only in association with LocalTempoMapScope */
 	LIBTEMPORAL_API static SharedPtr global_fetch() { return _map_mgr.reader(); }
 
@@ -778,7 +778,7 @@ class /*LIBTEMPORAL_API*/ TempoMap : public PBD::StatefulDestructible
 	 * can be used on either a write_copy()'ed map, or one obtained via the
 	 * RCU reader() method.
 	 */
-	LIBTEMPORAL_API static void      set (SharedPtr new_map) { _tempo_map_p = new_map; }
+	LIBTEMPORAL_API static void      set (SharedPtr new_map);
 
 	/* API for typical tempo map changes */
 

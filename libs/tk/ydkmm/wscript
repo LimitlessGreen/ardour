@@ -58,7 +58,7 @@ def build(bld):
     obj.includes        = ['.']
     obj.name            = 'libydkmm'
     obj.target          = 'ydkmm'
-    obj.use             = 'libztkmm libytk'
+    obj.use             = [ 'libydk', 'libydk-pixbuf', 'libztkmm', 'libytk' ]
     obj.uselib          = 'GLIBMM GIOMM SIGCPP CAIROMM PANGOMM'
     obj.defines         = [ '_LARGEFILE64_SOURCE', '_REENTRANT', 'G_LOG_DOMAIN="gdkmm"', 'GDKMM_BUILD=1', '_FILE_OFFSET_BITS=64' ]
     obj.vnum            = LIBYDKMM_VERSION
