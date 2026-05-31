@@ -149,6 +149,13 @@ jobs:
             Compare upstream changes:
             https://github.com/Ardour/ardour/compare/${{ steps.sync.outputs.old_sha }}...${{ steps.sync.outputs.new_sha }}
 
+      - name: Fail if CI branch rebase conflicted
+        if: always() && steps.sync.outputs.updated == 'true' && steps.rebase_ci.outputs.status == 'rebase-conflict'
+        run: |
+          set -euxo pipefail
+          echo "::error::Rebase conflict while updating $CI_BRANCH onto $TARGET_BRANCH. Resolve conflicts on CI branch."
+          exit 1
+
       - name: Workflow summary
         if: always()
         run: |
