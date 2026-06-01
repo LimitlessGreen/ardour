@@ -1,0 +1,163 @@
+name: Daily Upstream Sync + Release
+
+on:
+  schedule:
+    - cron: '15 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-and-release:
+    name: Sync fork with upstream, rebase CI branch, and release
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPO: https://github.com/Ardour/ardour.git
+      UPSTREAM_BRANCH: master
+      TARGET_BRANCH: master
+      CI_BRANCH: ci/github-actions-multi-os-builds
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.TARGET_BRANCH }}
+
+      - name: Configure Git
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream and origin branches
+        run: |
+          set -euxo pipefail
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "$UPSTREAM_REPO"
+          else
+            git remote add upstream "$UPSTREAM_REPO"
+          fi
+
+          git fetch --prune origin "$TARGET_BRANCH" "$CI_BRANCH" || true
+          git fetch --prune upstream "$UPSTREAM_BRANCH"
+
+      - name: Sync target branch with upstream
+        id: sync
+        run: |
+          set -euxo pipefail
+
+          # Use merge-base so OLD_SHA is always the last upstream point,
+          # even if origin/master has fork-specific commits on top.
+          OLD_SHA="$(git merge-base "origin/$TARGET_BRANCH" "upstream/$UPSTREAM_BRANCH")"
+          NEW_SHA="$(git rev-parse "upstream/$UPSTREAM_BRANCH")"
+
+          echo "old_sha=$OLD_SHA" >> "$GITHUB_OUTPUT"
+          echo "new_sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "$OLD_SHA" = "$NEW_SHA" ]; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Count fork-specific commits on master that are not in upstream.
+          OUR_AHEAD="$(git rev-list --count "upstream/$UPSTREAM_BRANCH..origin/$TARGET_BRANCH")"
+          git checkout -B "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+
+          if [ "$OUR_AHEAD" -eq 0 ]; then
+            # No fork-specific commits: simple fast-forward.
+            git reset --hard "upstream/$UPSTREAM_BRANCH"
+            git push origin "$TARGET_BRANCH"
+          else
+            # Fork has extra commits (e.g. our workflow files).
+            # Rebase them on top of upstream to keep a linear history.
+            git rebase "upstream/$UPSTREAM_BRANCH"
+            git push --force-with-lease origin "$TARGET_BRANCH"
+          fi
+
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Rebase CI branch onto updated target branch
+        id: rebase_ci
+        if: steps.sync.outputs.updated == 'true'
+        run: |
+          set -euxo pipefail
+
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$CI_BRANCH"; then
+            echo "status=missing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git checkout -B "$CI_BRANCH" "origin/$CI_BRANCH"
+
+          if git rebase "origin/$TARGET_BRANCH"; then
+            if git diff --quiet "origin/$CI_BRANCH...HEAD"; then
+              echo "status=up-to-date" >> "$GITHUB_OUTPUT"
+            else
+              git push --force-with-lease origin "$CI_BRANCH"
+              echo "status=rebased-and-pushed" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            git rebase --abort || true
+            echo "status=rebase-conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag name
+        id: tag
+        if: steps.sync.outputs.updated == 'true'
+        run: |
+          set -euxo pipefail
+          SHORT_SHA="${{ steps.sync.outputs.new_sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          TAG="upstream-sync-$(date -u +%Y%m%d)-${SHORT_SHA}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push release tag
+        if: steps.sync.outputs.updated == 'true'
+        run: |
+          set -euxo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          NEW_SHA="${{ steps.sync.outputs.new_sha }}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; skipping tag creation"
+            exit 0
+          fi
+
+          git tag "$TAG" "$NEW_SHA"
+          git push origin "$TAG"
+
+      - name: Create release
+        if: steps.sync.outputs.updated == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ env.TARGET_BRANCH }}
+          generate_release_notes: true
+          body: |
+            Automated daily sync with upstream Ardour.
+
+            - Upstream old: `${{ steps.sync.outputs.old_sha }}`
+            - Upstream new: `${{ steps.sync.outputs.new_sha }}`
+            - CI branch rebase status: `${{ steps.rebase_ci.outputs.status || 'not-run' }}`
+
+            Compare upstream changes:
+            https://github.com/Ardour/ardour/compare/${{ steps.sync.outputs.old_sha }}...${{ steps.sync.outputs.new_sha }}
+
+      - name: Workflow summary
+        if: always()
+        run: |
+          {
+            echo "## Daily Sync Result"
+            echo ""
+            echo "- Updated upstream target branch: `${{ steps.sync.outputs.updated || 'false' }}`"
+            echo "- Target branch old SHA: `${{ steps.sync.outputs.old_sha || 'n/a' }}`"
+            echo "- Target branch new SHA: `${{ steps.sync.outputs.new_sha || 'n/a' }}`"
+            echo "- CI branch rebase status: `${{ steps.rebase_ci.outputs.status || 'not-run' }}`"
+            echo "- Release tag: `${{ steps.tag.outputs.tag || 'not-created' }}`"
+          } >> "$GITHUB_STEP_SUMMARY"
