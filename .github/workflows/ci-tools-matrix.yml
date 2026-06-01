@@ -41,20 +41,23 @@ jobs:
             runner: ubuntu-24.04
             shell: bash
             backends: jack,dummy,alsa,pulseaudio
+            ccache_size: 750M
           - target: linux-arm64
             runner: ubuntu-24.04-arm
             shell: bash
             backends: jack,dummy,alsa,pulseaudio
+            ccache_size: 750M
           - target: macos-arm64
             runner: macos-14
             shell: bash
             backends: dummy,coreaudio
+            ccache_size: 2G
 
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
-      CCACHE_MAXSIZE: 750M
+      CCACHE_MAXSIZE: ${{ matrix.ccache_size }}
 
     steps:
       - name: Checkout
@@ -130,10 +133,6 @@ jobs:
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             echo "PATH=/usr/lib/ccache:$PATH" >> "$GITHUB_ENV"
           fi
-          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
-          echo "CCACHE_BASEDIR=$CCACHE_BASEDIR" >> "$GITHUB_ENV"
-          echo "CCACHE_COMPILERCHECK=$CCACHE_COMPILERCHECK" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=$CCACHE_MAXSIZE" >> "$GITHUB_ENV"
           ccache -p
 
       - name: Prepare output folders
@@ -193,7 +192,6 @@ jobs:
           retention-days: 14
 
       - name: Upload build artifact
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ardour-${{ matrix.target }}
